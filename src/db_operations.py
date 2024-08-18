@@ -18,11 +18,15 @@ class DatabaseOperations:
             self.conn.close()
             print("MySQL connection is closed")
 
+    
     def insert_fill_events(self, events, chain_id):
         insert_query = """
         INSERT IGNORE INTO filled_v3_relays 
-        (destination_chain_id, relayer, input_token, output_token, input_amount, output_amount, deposit_id, fill_deadline)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        (input_token, output_token, input_amount, output_amount, repayment_chain_id, 
+        origin_chain_id, deposit_id, fill_deadline, exclusivity_deadline, exclusive_relayer, 
+        relayer, depositor, recipient, message, transaction_hash, 
+        block_number, log_index)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         total_inserted = 0
@@ -33,16 +37,26 @@ class DatabaseOperations:
             for index, event in enumerate(events, 1):
                 args = event['args']
                 fill_deadline = datetime.fromtimestamp(args['fillDeadline'])
+                exclusivity_deadline = datetime.fromtimestamp(args['exclusivityDeadline'])
                 
                 data = (
-                    str(chain_id),
-                    args['relayer'],
                     args['inputToken'],
                     args['outputToken'],
                     str(args['inputAmount']),
                     str(args['outputAmount']),
+                    str(args['repaymentChainId']),
+                    str(chain_id),  # 使用传入的 chain_id 作为 origin_chain_id
                     str(args['depositId']),
-                    fill_deadline
+                    fill_deadline,
+                    exclusivity_deadline,
+                    args['exclusiveRelayer'],
+                    args['relayer'],
+                    args['depositor'],
+                    args['recipient'],
+                    args['message'].hex(),
+                    event['transactionHash'].hex(),
+                    event['blockNumber'],
+                    event['logIndex']
                 )
                 self.cursor.execute(insert_query, data)
                 total_processed += 1
@@ -63,7 +77,6 @@ class DatabaseOperations:
             raise
 
         return total_processed, total_inserted
-    
     def insert_deposit_events(self, events, chain_id):
         query = """
         INSERT IGNORE INTO v3_funds_deposited 

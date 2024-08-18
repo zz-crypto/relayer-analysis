@@ -3,6 +3,8 @@ from web3 import Web3
 import time
 from datetime import datetime, timedelta
 from db_operations import DatabaseOperations
+from web3.middleware import geth_poa_middleware
+
 
 def load_config(filename):
     with open(filename, 'r') as f:
@@ -46,6 +48,7 @@ def get_block_range(w3, start_time, end_time):
 
 def setup_web3_and_contract(chain_config, contract_address, contract_abi):
     w3 = Web3(Web3.HTTPProvider(chain_config['rpc_endpoint']))
+    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
     contract = w3.eth.contract(address=contract_address, abi=contract_abi)
     return w3, contract
 

@@ -1,14 +1,30 @@
 import pandas as pd
+import mysql.connector
+from sqlalchemy import create_engine    
 
-df = pd.read_csv('your_data.csv') 
+engine = create_engine('mysql+mysqlconnector://root:your_new_password@localhost:3306/across_relay')
 
-df['profit_rate'] = (df['earnedAmount'] / df['inputAmount']) * 100
+query = "SELECT * FROM relay_analysis"
+df = pd.read_sql(query, engine)
+
+chain_name_map = {
+    1: 'Ethereum',
+    10: 'Optimism',
+    8453: 'Base',
+    137: 'Polygon',
+    42161: 'Arbitrum'    
+}
+
+df['destinationChainName'] = df['destination_chain_id'].map(chain_name_map)
+df['originChainName'] = df['origin_chain_id'].map(chain_name_map)
+df['tokenName'] = df['input_token']
+df['profit_rate'] = (df['earned_amount'] / df['input_amount']) * 100
 
 profitable_combinations = df.groupby(['destinationChainName', 'originChainName', 'tokenName'])\
     .agg({
         'profit_rate': ['mean', 'std', 'count'],
-        'earnedAmount': 'sum',
-        'inputAmount': 'sum'
+        'earned_amount': 'sum',
+        'input_amount': 'sum'
     }).reset_index()
 
 profitable_combinations.columns = ['destinationChain', 'originChain', 'token', 'avg_profit_rate', 'std_profit_rate', 'transaction_count', 'total_earned', 'total_input']
