@@ -103,7 +103,35 @@ def fetch_events(chain_config, start_time, end_time, contract_abi):
 
     return filled_events, deposited_events
 
-def main():
+def fetch_block_details(w3, chain_id, block_numbers, db_ops, batch_size=100):
+    total_blocks = len(block_numbers)
+    processed_blocks = 0
+
+    for i in range(0, total_blocks, batch_size):
+        batch = block_numbers[i:i+batch_size]
+        block_details = []
+        for block_number in batch:
+            try:
+                block = w3.eth.get_block(block_number)
+                block_details.append((
+                    chain_id,
+                    block_number,
+                    datetime.fromtimestamp(block['timestamp']),
+                    block['gasUsed'],
+                    block['gasLimit'],
+                    block.get('baseFeePerGas', 0) 
+                ))
+            except Exception as e:
+                print(f"Error fetching block {block_number} for chain {chain_id}: {e}")
+        
+        db_ops.insert_block_details(chain_id, block_details)
+        
+        processed_blocks += len(batch)
+        print(f"Processed {processed_blocks}/{total_blocks} blocks for chain {chain_id}")
+
+    print(f"Finished processing all blocks for chain {chain_id}")
+
+def main(fetch_events=True, fetch_blocks=True):
     config = load_config('config.json')
     contract_abi = load_abi('abi.json')
 
@@ -126,19 +154,39 @@ def main():
         total_inserted = 0
         total_processed = 0
 
-        for chain_config in config:
-            filled_events, deposited_events = fetch_events(chain_config, start_time, end_time, contract_abi)
-            
-            print(f"Processing {len(filled_events)} FilledV3Relay events for chain {chain_config['chainid']}")
-            processed_filled, inserted_filled = db_ops.insert_fill_events(filled_events, chain_config['chainid'])
-            
-            print(f"Processing {len(deposited_events)} V3FundsDeposited events for chain {chain_config['chainid']}")
-            processed_deposited, inserted_deposited = db_ops.insert_deposit_events(deposited_events, chain_config['chainid'])
-            
-            total_processed += processed_filled + processed_deposited
-            total_inserted += inserted_filled + inserted_deposited
+        if fetch_events:
+            for chain_config in config:
+                filled_events, deposited_events = fetch_events(chain_config, start_time, end_time, contract_abi)
+                
+                print(f"Processing {len(filled_events)} FilledV3Relay events for chain {chain_config['chainid']}")
+                processed_filled, inserted_filled = db_ops.insert_fill_events(filled_events, chain_config['chainid'])
+                
+                print(f"Processing {len(deposited_events)} V3FundsDeposited events for chain {chain_config['chainid']}")
+                processed_deposited, inserted_deposited = db_ops.insert_deposit_events(deposited_events, chain_config['chainid'])
+                
+                total_processed += processed_filled + processed_deposited
+                total_inserted += inserted_filled + inserted_deposited
 
-            print(f"Total rows inserted so far: {total_inserted}")
+                print(f"Total rows inserted so far: {total_inserted}")
+
+            print(f"Event fetching completed. Total rows processed: {total_processed}. Total new rows inserted: {total_inserted}")
+
+        if fetch_blocks:
+            unique_blocks = db_ops.get_unique_blocks()
+            
+            blocks_by_chain = {}
+            for chain_id, block_number in unique_blocks:
+                if chain_id not in blocks_by_chain:
+                    blocks_by_chain[chain_id] = []
+                blocks_by_chain[chain_id].append(block_number)
+
+            for chain_config in config:
+                chain_id = chain_config['chainid']
+                if chain_id in blocks_by_chain:
+                    w3, _ = setup_web3_and_contract(chain_config, chain_config['contract_address'], contract_abi)
+                    fetch_block_details(w3, chain_id, blocks_by_chain[chain_id], db_ops, batch_size=100)
+
+            print("Block fetching completed.")
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -146,7 +194,18 @@ def main():
     finally:
         db_ops.close()
 
-    print(f"Script completed. Total rows processed: {total_processed}. Total new rows inserted: {total_inserted}")
+    print("Script execution completed.")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Fetch events and block details for Across protocol")
+    parser.add_argument('--events', action='store_true', help='Fetch events')
+    parser.add_argument('--blocks', action='store_true', help='Fetch block details')
+    args = parser.parse_args()
+
+    if not args.events and not args.blocks:
+        args.events = True
+        args.blocks = True
+
+    main(fetch_events=args.events, fetch_blocks=args.blocks)

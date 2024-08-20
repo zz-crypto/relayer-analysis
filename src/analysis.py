@@ -19,8 +19,16 @@ finally:
 
 engine = create_engine('mysql+mysqlconnector://root:your_new_password@localhost:3306/across_relay')
 
+
 query = "SELECT * FROM relay_analysis"
-df = pd.read_sql(query, engine)
+df_raw = pd.read_sql(query, engine)
+
+
+df_raw.to_csv('relay_analysis_raw_data.csv', index=False)
+print("Raw data from relay_analysis table has been saved to 'relay_analysis_raw_data.csv'")
+
+
+df = df_raw.copy()  
 
 chain_name_map = {
     1: 'Ethereum',
@@ -49,9 +57,7 @@ profitable_combinations['overall_profit_rate'] = (profitable_combinations['total
 profitable_combinations_by_avg = profitable_combinations.sort_values('avg_profit_rate', ascending=False)
 profitable_combinations_by_overall = profitable_combinations.sort_values('overall_profit_rate', ascending=False)
 
-# Save results to CSV files
 profitable_combinations_by_avg[['destinationChain', 'originChain', 'token', 'avg_profit_rate', 'std_profit_rate', 'transaction_count']].to_csv('profitable_combinations_by_avg.csv', index=False)
-
 profitable_combinations_by_overall[['destinationChain', 'originChain', 'token', 'overall_profit_rate', 'total_earned', 'total_input', 'transaction_count']].to_csv('profitable_combinations_by_overall.csv', index=False)
 
-print("Results have been saved to 'profitable_combinations_by_avg.csv' and 'profitable_combinations_by_overall.csv'")
+print("Analysis results have been saved to 'profitable_combinations_by_avg.csv' and 'profitable_combinations_by_overall.csv'")

@@ -77,3 +77,14 @@ CREATE TABLE IF NOT EXISTS relay_analysis (
     earned_amount DECIMAL(65,0) NOT NULL,
     UNIQUE KEY unique_relay (destination_chain_id, origin_chain_id, deposit_id)
 );
+
+CREATE TABLE IF NOT EXISTS block_details (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chain_id INT NOT NULL,
+    block_number INT NOT NULL,
+    block_timestamp DATETIME NOT NULL,
+    gas_used BIGINT NOT NULL,
+    gas_limit BIGINT NOT NULL,
+    base_fee_per_gas DECIMAL(65,0),
+    UNIQUE KEY unique_block (chain_id, block_number)
+);

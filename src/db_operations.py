@@ -196,7 +196,6 @@ class DatabaseOperations:
             temp_filled_relays f ON d.deposit_id = f.deposit_id AND d.depositor = f.depositor
         LEFT JOIN
             transaction_details t ON f.transaction_hash = t.transaction_hash AND f.origin_chain_id = t.chain_id AND t.event_type = 'fill'
-        WHERE t.total_gas_fee is not null
         """
 
         try:
@@ -267,3 +266,31 @@ class DatabaseOperations:
         """
         self.cursor.execute(query)
         return self.cursor.fetchall()
+    
+    def get_unique_blocks(self):
+        query = """
+        SELECT DISTINCT chain_id, block_number FROM (
+            SELECT origin_chain_id as chain_id, block_number FROM filled_v3_relays
+            UNION
+            SELECT chain_id, block_number FROM v3_funds_deposited
+        ) as combined
+        WHERE (chain_id, block_number) NOT IN (
+            SELECT chain_id, block_number FROM block_details
+        )
+        """
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+    
+    def insert_block_details(self, chain_id, block_details):
+        insert_query = """
+        INSERT IGNORE INTO block_details 
+        (chain_id, block_number, block_timestamp, gas_used, gas_limit, base_fee_per_gas)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        try:
+            self.cursor.executemany(insert_query, block_details)
+            self.conn.commit()
+            print(f"Inserted {self.cursor.rowcount} block details for chain {chain_id}")
+        except Exception as e:
+            print(f"Error inserting block details for chain {chain_id}: {e}")
+            self.conn.rollback()
