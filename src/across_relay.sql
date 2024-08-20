@@ -25,11 +25,6 @@ CREATE TABLE IF NOT EXISTS filled_v3_relays (
     UNIQUE KEY unique_event (origin_chain_id, transaction_hash, log_index)
 );
 
--- select * from filled_v3_relays group by relayer
-
--- drop table filled_v3_relays
-
-
 CREATE TABLE IF NOT EXISTS v3_funds_deposited (
     id INT AUTO_INCREMENT PRIMARY KEY,
     chain_id INT NOT NULL,
@@ -53,29 +48,32 @@ CREATE TABLE IF NOT EXISTS v3_funds_deposited (
     UNIQUE KEY `unique_event` (chain_id, transaction_hash, log_index)
 );
 
--- select count(*) from v3_funds_deposited
--- select count(*) from filled_v3_relays
+CREATE TABLE IF NOT EXISTS transaction_details (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    chain_id INT NOT NULL,
+    transaction_hash VARCHAR(66) NOT NULL,
+    block_timestamp DATETIME NOT NULL,
+    gas_used BIGINT NOT NULL,
+    gas_price DECIMAL(65,0) NOT NULL,
+    total_gas_fee DECIMAL(65,0) NOT NULL,
+    event_type ENUM('deposit', 'fill') NOT NULL,
+    UNIQUE KEY unique_transaction (chain_id, transaction_hash, event_type)
+);
 
-CREATE VIEW v_relay_analysis AS
-SELECT 
-    f.repayment_chain_id as destination_chain_id,
-    d.chain_id AS origin_chain_id,
-    f.input_token,
-    f.output_token,
-    f.input_amount,
-    f.output_amount,
-    f.deposit_id,
-    f.relayer,
-    d.depositor,
-    d.recipient,
-    (f.input_amount - f.output_amount) AS earned_amount
-FROM 
-    filled_v3_relays f
-JOIN 
-    v3_funds_deposited d ON f.deposit_id = d.deposit_id AND f.repayment_chain_id = d.chain_id;
-    
--- select input_token from v_relay_analysis group by input_token
-select input_token from v_relay_analysis group by input_token;
-select output_token from v_relay_analysis group by output_token;
-select destination_chain_id, count(*) from v_relay_analysis group by destination_chain_id;
-select * from v_relay_analysis where destination_chain_id = 1
+ALTER TABLE relay_analysis ADD COLUMN gas_fee DECIMAL(65,0);
+
+CREATE TABLE IF NOT EXISTS relay_analysis (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    destination_chain_id INT NOT NULL,
+    origin_chain_id INT NOT NULL,
+    input_token VARCHAR(42) NOT NULL,
+    output_token VARCHAR(42) NOT NULL,
+    input_amount DECIMAL(65,0) NOT NULL,
+    output_amount DECIMAL(65,0) NOT NULL,
+    deposit_id INT NOT NULL,
+    relayer VARCHAR(42) NOT NULL,
+    depositor VARCHAR(42) NOT NULL,
+    recipient VARCHAR(42) NOT NULL,
+    earned_amount DECIMAL(65,0) NOT NULL,
+    UNIQUE KEY unique_relay (destination_chain_id, origin_chain_id, deposit_id)
+);
