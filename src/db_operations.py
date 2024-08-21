@@ -157,116 +157,70 @@ class DatabaseOperations:
         self.cursor.execute(query, (chain_id, chain_id))
         return [row[0] for row in self.cursor.fetchall()]
     
-    def fetch_and_insert_relay_data(self):
-        create_temp_table_query = """
-        CREATE TEMPORARY TABLE IF NOT EXISTS temp_filled_relays (
-            deposit_id INT,
-            origin_chain_id INT,
-            input_token VARCHAR(42),
-            output_token VARCHAR(42),
-            input_amount DECIMAL(65,0),
-            output_amount DECIMAL(65,0),
-            relayer VARCHAR(42),
-            depositor VARCHAR(42),
-            transaction_hash VARCHAR(66),
-            PRIMARY KEY (deposit_id, depositor)
-        )
+    def fetch_and_insert_relay_data(self, batch_size=1000):
+        get_deposit_ids_query = """
+        SELECT DISTINCT f.deposit_id
+        FROM filled_v3_relays f
+        LEFT JOIN relay_analysis ra ON f.deposit_id = ra.deposit_id
+        WHERE ra.deposit_id IS NULL
+        ORDER BY f.deposit_id
         """
-
-        insert_temp_table_query = """
-        INSERT INTO temp_filled_relays
-        SELECT deposit_id, origin_chain_id, input_token, output_token, input_amount, output_amount, relayer, depositor, transaction_hash
-        FROM filled_v3_relays
-        """
-
-        fetch_and_insert_query = """
-        INSERT IGNORE INTO relay_analysis 
-        (destination_chain_id, origin_chain_id, input_token, output_token, 
-        input_amount, output_amount, deposit_id, relayer, depositor, 
-        recipient, gas_fee, earned_amount)
-        SELECT 
-            d.destination_chain_id, d.chain_id AS origin_chain_id, 
-            f.input_token, f.output_token, f.input_amount, f.output_amount, 
-            d.deposit_id, f.relayer, d.depositor, d.recipient,
-            COALESCE(t.total_gas_fee, 0) AS gas_fee,
-            (f.input_amount - f.output_amount - COALESCE(t.total_gas_fee, 0)) AS earned_amount
-        FROM 
-            v3_funds_deposited d
-        JOIN
-            temp_filled_relays f ON d.deposit_id = f.deposit_id AND d.depositor = f.depositor
-        LEFT JOIN
-            transaction_details t ON f.transaction_hash = t.transaction_hash AND f.origin_chain_id = t.chain_id AND t.event_type = 'fill'
-        """
-
-        try:
-            print("Creating temporary table...")
-            self.cursor.execute(create_temp_table_query)
-            
-            print("Populating temporary table...")
-            self.cursor.execute(insert_temp_table_query)
-            self.conn.commit()
-            
-            print("Fetching and inserting data...")
-            self.cursor.execute(fetch_and_insert_query)
-            self.conn.commit()
-            
-            total_inserted = self.cursor.rowcount
-            print(f"Finished processing. Total rows inserted: {total_inserted}")
-
-        except mysql.connector.Error as err:
-            print(f"Error in fetch_and_insert_relay_data: {err}")
-            self.conn.rollback()
-        finally:
-            print("Dropping temporary table...")
-            self.cursor.execute("DROP TEMPORARY TABLE IF EXISTS temp_filled_relays")
-            self.conn.commit()
-
-        return total_inserted
-    
-    def insert_transaction_details_zetta(self, chain_id, transaction_hash, block_timestamp, gas_used, gas_price, total_gas_fee, event_type):
-        query = """
-        INSERT IGNORE INTO transaction_details_zetta 
-        (chain_id, transaction_hash, block_timestamp, gas_used, gas_price, total_gas_fee, event_type)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        data = (chain_id, transaction_hash, block_timestamp, gas_used, gas_price, total_gas_fee, event_type)
         
-        try:
-            self.cursor.execute(query, data)
-            self.conn.commit()
-            return self.cursor.rowcount
-        except mysql.connector.Error as err:
-            print(f"Error inserting Zetta transaction details: {err}")
-            self.conn.rollback()
-            return 0
-
-    def get_unprocessed_transactions_zetta(self):
-        query = """
-        SELECT 
-            CASE 
-                WHEN f.transaction_hash IS NOT NULL THEN f.transaction_hash 
-                ELSE d.transaction_hash 
-            END AS transaction_hash,
-            CASE 
-                WHEN f.transaction_hash IS NOT NULL THEN 'fill' 
-                ELSE 'deposit' 
-            END AS event_type,
-            COALESCE(d.chain_id, f.origin_chain_id) AS chain_id,
-            f.repayment_chain_id
-        FROM 
-            v3_funds_deposited d
-        FULL OUTER JOIN 
-            filled_v3_relays f ON d.deposit_id = f.deposit_id
-        LEFT JOIN 
-            transaction_details_zetta t ON 
-                (t.transaction_hash = d.transaction_hash AND t.chain_id = d.chain_id) OR
-                (t.transaction_hash = f.transaction_hash AND t.chain_id = f.repayment_chain_id)
-        WHERE 
-            t.transaction_hash IS NULL
-        """
-        self.cursor.execute(query)
-        return self.cursor.fetchall()
-    
+        self.cursor.execute(get_deposit_ids_query)
+        all_deposit_ids = [row[0] for row in self.cursor.fetchall()]
+        
+        total_inserted = 0
+        
+        for i in range(0, len(all_deposit_ids), batch_size):
+            batch_deposit_ids = all_deposit_ids[i:i+batch_size]
+            
+            insert_query = """
+            INSERT IGNORE INTO relay_analysis 
+            (destination_chain_id, origin_chain_id, input_token, output_token, 
+            input_amount, output_amount, deposit_id, relayer, depositor, 
+            recipient, gas_fee, earned_amount, priority_fee, input_amount_usd, output_amount_usd, earned_amount_usd)
+            SELECT 
+                d.destination_chain_id, f.origin_chain_id, 
+                f.input_token, f.output_token, f.input_amount, f.output_amount, 
+                f.deposit_id, f.relayer, f.depositor, d.recipient,
+                COALESCE(t.total_gas_fee, 0) AS gas_fee,
+                (f.input_amount - f.output_amount - COALESCE(t.total_gas_fee, 0)) AS earned_amount,
+                GREATEST(0, t.gas_price - b.base_fee_per_gas) * t.gas_used AS priority_fee,
+                f.input_amount * COALESCE(p1.price_usd, 1) AS input_amount_usd,
+                f.output_amount * COALESCE(p2.price_usd, 1) AS output_amount_usd,
+                (f.input_amount * COALESCE(p1.price_usd, 1) - f.output_amount * COALESCE(p2.price_usd, 1) - COALESCE(t.total_gas_fee, 0) * 2587.59) AS earned_amount_usd
+            FROM 
+                filled_v3_relays f
+            JOIN
+                v3_funds_deposited d ON f.deposit_id = d.deposit_id AND f.depositor = d.depositor
+            LEFT JOIN
+                transaction_details t ON f.transaction_hash = t.transaction_hash AND f.origin_chain_id = t.chain_id
+            LEFT JOIN
+                block_details b ON t.chain_id = b.chain_id AND t.block_timestamp = b.block_timestamp
+            LEFT JOIN
+                (SELECT token_address, price_usd FROM token_prices WHERE price_date = (SELECT MAX(price_date) FROM token_prices)) p1 
+                ON f.input_token = p1.token_address
+            LEFT JOIN
+                (SELECT token_address, price_usd FROM token_prices WHERE price_date = (SELECT MAX(price_date) FROM token_prices)) p2 
+                ON f.output_token = p2.token_address
+            WHERE f.deposit_id IN ({})
+            """
+            
+            formatted_query = insert_query.format(','.join(['%s'] * len(batch_deposit_ids)))
+            
+            try:
+                print(f"Processing batch {i//batch_size + 1}, deposit_ids {batch_deposit_ids[0]} to {batch_deposit_ids[-1]}")
+                self.cursor.execute(formatted_query, batch_deposit_ids)
+                self.conn.commit()
+                inserted = self.cursor.rowcount
+                total_inserted += inserted
+                print(f"Inserted {inserted} rows in this batch. Total inserted: {total_inserted}")
+            except mysql.connector.Error as err:
+                print(f"Error processing batch: {err}")
+                self.conn.rollback()
+        
+        print(f"Finished processing. Total rows inserted: {total_inserted}")
+        return total_inserted
     def get_unique_blocks(self):
         query = """
         SELECT DISTINCT chain_id, block_number FROM (
