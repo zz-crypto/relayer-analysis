@@ -4,6 +4,7 @@ USE across_relay;
 
 CREATE TABLE IF NOT EXISTS filled_v3_relays (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    chain_id INT NOT NULL,
     input_token VARCHAR(42) NOT NULL,
     output_token VARCHAR(42) NOT NULL,
     input_amount DECIMAL(65,0) NOT NULL,
@@ -106,3 +107,82 @@ CREATE TABLE IF NOT EXISTS token_prices (
 
 CREATE INDEX idx_token_address ON token_prices(token_address);
 CREATE INDEX idx_price_date ON token_prices(price_date);
+
+ALTER TABLE token_prices ADD COLUMN symbol VARCHAR(20) AFTER token_address;
+ALTER TABLE token_prices DROP INDEX unique_token_price;
+ALTER TABLE token_prices ADD UNIQUE KEY unique_token_price (token_address, symbol, price_date);
+CREATE INDEX idx_symbol ON token_prices(symbol);
+
+CREATE INDEX idx_filled_v3_relays_transaction_hash ON filled_v3_relays(transaction_hash);
+CREATE INDEX idx_v3_funds_deposited_transaction_hash ON v3_funds_deposited(transaction_hash);
+
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'filled_v3_relays' AND index_name = 'idx_chain_tx';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_chain_tx ON filled_v3_relays (chain_id, transaction_hash)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'filled_v3_relays' AND index_name = 'idx_deposit_id';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_deposit_id ON filled_v3_relays (deposit_id)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'filled_v3_relays' AND index_name = 'idx_chain_block';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_chain_block ON filled_v3_relays (chain_id, block_number)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'v3_funds_deposited' AND index_name = 'idx_chain_tx';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_chain_tx ON v3_funds_deposited (chain_id, transaction_hash)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'v3_funds_deposited' AND index_name = 'idx_deposit_dest';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_deposit_dest ON v3_funds_deposited (deposit_id, destination_chain_id)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'v3_funds_deposited' AND index_name = 'idx_chain_block';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_chain_block ON v3_funds_deposited (chain_id, block_number)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'transaction_details' AND index_name = 'idx_chain_tx';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_chain_tx ON transaction_details (chain_id, transaction_hash)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'relay_analysis' AND index_name = 'idx_deposit_id';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_deposit_id ON relay_analysis (deposit_id)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'block_details' AND index_name = 'idx_chain_block';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_chain_block ON block_details (chain_id, block_number)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @index_exists FROM information_schema.statistics 
+WHERE table_schema = DATABASE() AND table_name = 'token_prices' AND index_name = 'idx_token_address';
+SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_token_address ON token_prices (token_address)', 'SELECT ''Index already exists''');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

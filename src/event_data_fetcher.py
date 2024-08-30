@@ -26,7 +26,7 @@ def binary_search_block(w3, target_timestamp, left, right):
             right = mid - 1
     return right
 
-def get_block_range(w3, start_time, end_time):
+def get_block_range(chain_id, w3, start_time, end_time):
     latest_block = w3.eth.get_block('latest', full_transactions=False)
     latest_block_number = latest_block['number']
     latest_timestamp = latest_block['timestamp']
@@ -37,9 +37,14 @@ def get_block_range(w3, start_time, end_time):
     if end_time > latest_timestamp:
         end_time = latest_timestamp
 
-    avg_block_time = 15
-    est_start_block = latest_block_number - (latest_timestamp - start_time) // avg_block_time
-    est_end_block = latest_block_number - (latest_timestamp - end_time) // avg_block_time
+    avg_block_time = 2.0
+    if chain_id == 1:
+        avg_block_time = 12.0
+    if chain_id == 42161:
+        avg_block_time = 0.2
+    
+    est_start_block = int(latest_block_number - (latest_timestamp - start_time) // avg_block_time)
+    est_end_block = int(latest_block_number - (latest_timestamp - end_time) // avg_block_time)
 
     start_block = binary_search_block(w3, start_time, max(0, est_start_block - 1000), min(latest_block_number, est_start_block + 1000))
     end_block = binary_search_block(w3, end_time, max(0, est_end_block - 1000), min(latest_block_number, est_end_block + 1000))
@@ -62,11 +67,11 @@ def print_progress(chain_id, events_count, progress, total_duration, estimated_t
     print(f"Total duration: {total_duration:.2f} seconds")
     print(f"Estimated time left: {timedelta(seconds=int(estimated_time_left))}")
 
-def fetch_events(chain_config, start_time, end_time, contract_abi):
+def fetch_events_details(chain_config, start_time, end_time, contract_abi):
     print(f"Start fetching. Start time: {start_time}, End time: {end_time}")
     w3, contract = setup_web3_and_contract(chain_config, chain_config['contract_address'], contract_abi)
 
-    start_block, end_block = get_block_range(w3, start_time, end_time)
+    start_block, end_block = get_block_range(chain_config['chainid'], w3, start_time, end_time)
     if start_block is None or end_block is None:
         print(f"No valid block range found for chain {chain_config['chainid']}")
         return [], []
@@ -144,7 +149,7 @@ def main(fetch_events=True, fetch_blocks=True):
     }
 
     end_time = int(time.time())
-    start_time = end_time - 24 * 60 * 60 * 30 
+    start_time = end_time - 24 * 60 * 60 * 30
 
     db_ops = DatabaseOperations(db_config)
 
@@ -155,8 +160,9 @@ def main(fetch_events=True, fetch_blocks=True):
         total_processed = 0
 
         if fetch_events:
+            print(f"Event fetching started.")
             for chain_config in config:
-                filled_events, deposited_events = fetch_events(chain_config, start_time, end_time, contract_abi)
+                filled_events, deposited_events = fetch_events_details(chain_config, start_time, end_time, contract_abi)
                 
                 print(f"Processing {len(filled_events)} FilledV3Relay events for chain {chain_config['chainid']}")
                 processed_filled, inserted_filled = db_ops.insert_fill_events(filled_events, chain_config['chainid'])
@@ -172,6 +178,7 @@ def main(fetch_events=True, fetch_blocks=True):
             print(f"Event fetching completed. Total rows processed: {total_processed}. Total new rows inserted: {total_inserted}")
 
         if fetch_blocks:
+            print("Block fetching started.")
             unique_blocks = db_ops.get_unique_blocks()
             
             blocks_by_chain = {}

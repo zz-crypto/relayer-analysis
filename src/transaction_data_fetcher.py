@@ -34,10 +34,8 @@ def fetch_transaction_details(w3, transaction_hash, chain_id, event_type, db_ops
             event_type
         )
         
-        if inserted:
-            print(f"Inserted transaction details for {transaction_hash}")
-        else:
-            print(f"Failed to insert transaction details for {transaction_hash}")
+        if not inserted:
+            print(f"Failed to insert transaction details for {transaction_hash}")            
     
     except Exception as e:
         print(f"Error fetching transaction details for {transaction_hash}: {e}")

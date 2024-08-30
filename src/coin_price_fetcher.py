@@ -9,6 +9,14 @@ from web3.exceptions import ContractLogicError
 CMC_API_KEY = ''  
 CMC_BASE_URL = 'https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/latest'
 
+db_config = {
+    'host': 'localhost',
+    'port': 3306,
+    'user': 'root',
+    'password': 'your_new_password',
+    'database': 'across_relay'
+}
+
 
 with open('config.json', 'r') as f:
     config = json.load(f)
@@ -131,13 +139,13 @@ def get_token_price(symbol):
         print(f"Error parsing CMC response for {symbol}: {e}")
         return None
 
-def insert_token_price(cursor, token_address, price_date, price_usd):
+def insert_token_price(cursor, token_address, symbol, price_date, price_usd):
     query = """
-    INSERT INTO token_prices (token_address, price_date, price_usd)
-    VALUES (%s, %s, %s)
-    ON DUPLICATE KEY UPDATE price_usd = VALUES(price_usd)
+    INSERT INTO token_prices (token_address, symbol, price_date, price_usd)
+    VALUES (%s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE price_usd = VALUES(price_usd), symbol = VALUES(symbol)
     """
-    cursor.execute(query, (token_address, price_date, price_usd))
+    cursor.execute(query, (token_address, symbol, price_date, price_usd))
 
 def fetch_unique_tokens(cursor):
     print("Fetching unique token addresses")
@@ -153,6 +161,7 @@ def fetch_unique_tokens(cursor):
     WHERE token_address NOT IN (
         SELECT token_address
         FROM token_prices
+        WHERE price_date = CURDATE()
     )
     """
     cursor.execute(query)
@@ -166,24 +175,18 @@ def update_token_prices(conn, cursor, price_date):
         try:
             symbol = get_token_symbol(token_address)
             if symbol is None:
+                print(f"Skipping token {token_address} due to missing symbol")
                 continue
             price = get_token_price(symbol)
             if price is not None:
-                insert_token_price(cursor, token_address, price_date, price)
+                insert_token_price(cursor, token_address, symbol, price_date, price)
+                print(f"Updated price for token {token_address} (symbol: {symbol}): ${price}")
+            else:
+                print(f"Failed to get price for token {token_address} (symbol: {symbol})")
         except Exception as e:
             print(f"Error processing token {token_address}: {e}")
     
     conn.commit()
-
-
-db_config = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': 'your_new_password',
-    'database': 'across_relay'
-}
-
 
 if __name__ == "__main__":
     conn = mysql.connector.connect(**db_config)

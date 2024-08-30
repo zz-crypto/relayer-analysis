@@ -22,11 +22,11 @@ class DatabaseOperations:
     def insert_fill_events(self, events, chain_id):
         insert_query = """
         INSERT IGNORE INTO filled_v3_relays 
-        (input_token, output_token, input_amount, output_amount, repayment_chain_id, 
+        (chain_id, input_token, output_token, input_amount, output_amount, repayment_chain_id, 
         origin_chain_id, deposit_id, fill_deadline, exclusivity_deadline, exclusive_relayer, 
         relayer, depositor, recipient, message, transaction_hash, 
         block_number, log_index)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         total_inserted = 0
@@ -40,12 +40,13 @@ class DatabaseOperations:
                 exclusivity_deadline = datetime.fromtimestamp(args['exclusivityDeadline'])
                 
                 data = (
+                    str(chain_id), 
                     args['inputToken'],
                     args['outputToken'],
                     str(args['inputAmount']),
                     str(args['outputAmount']),
                     str(args['repaymentChainId']),
-                    str(chain_id),  
+                    str(args['originChainId']), 
                     str(args['depositId']),
                     fill_deadline,
                     exclusivity_deadline,
@@ -77,7 +78,8 @@ class DatabaseOperations:
             raise
 
         return total_processed, total_inserted
-    def insert_deposit_events(self, events, chain_id):
+    
+    def insert_deposit_events(self, events, chain_id, batch_size=100):
         query = """
         INSERT IGNORE INTO v3_funds_deposited 
         (chain_id, block_number, transaction_hash, log_index, input_token, output_token, 
@@ -86,38 +88,46 @@ class DatabaseOperations:
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
-        values = [
-            (
-                chain_id,
-                event['blockNumber'],
-                event['transactionHash'].hex(),
-                event['logIndex'],
-                event['args']['inputToken'],
-                event['args']['outputToken'],
-                str(event['args']['inputAmount']),
-                str(event['args']['outputAmount']),
-                event['args']['destinationChainId'],
-                event['args']['depositId'],
-                event['args']['quoteTimestamp'],
-                event['args']['fillDeadline'],
-                event['args']['exclusivityDeadline'],
-                event['args']['depositor'],
-                event['args']['recipient'],
-                event['args']['exclusiveRelayer'],
-                event['args']['message'].hex()
-            )
-            for event in events
-        ]
+        total_events = len(events)
+        total_inserted = 0
         
-        try:
-            with self.conn.cursor() as cursor:
-                cursor.executemany(query, values)
-            self.conn.commit()
-            return len(events), cursor.rowcount
-        except Exception as e:
-            print(f"Error inserting V3FundsDeposited events: {e}")
-            self.conn.rollback()
-            return 0, 0
+        for i in range(0, total_events, batch_size):
+            batch = events[i:i+batch_size]
+            values = [
+                (
+                    chain_id,
+                    event['blockNumber'],
+                    event['transactionHash'].hex(),
+                    event['logIndex'],
+                    event['args']['inputToken'],
+                    event['args']['outputToken'],
+                    str(event['args']['inputAmount']),
+                    str(event['args']['outputAmount']),
+                    event['args']['destinationChainId'],
+                    event['args']['depositId'],
+                    event['args']['quoteTimestamp'],
+                    event['args']['fillDeadline'],
+                    event['args']['exclusivityDeadline'],
+                    event['args']['depositor'],
+                    event['args']['recipient'],
+                    event['args']['exclusiveRelayer'],
+                    event['args']['message'].hex()
+                )
+                for event in batch
+            ]
+            
+            try:
+                with self.conn.cursor() as cursor:
+                    cursor.executemany(query, values)
+                self.conn.commit()
+                inserted = cursor.rowcount
+                total_inserted += inserted
+                print(f"Inserted {inserted} out of {len(batch)} events in this batch. Total inserted: {total_inserted}/{total_events}")
+            except Exception as e:
+                print(f"Error inserting batch of V3FundsDeposited events: {e}")
+                self.conn.rollback()
+        
+        return total_events, total_inserted
         
     def insert_transaction_details(self, chain_id, transaction_hash, block_timestamp, gas_used, gas_price, total_gas_fee, event_type):
         query = """
@@ -142,7 +152,7 @@ class DatabaseOperations:
             SELECT DISTINCT t.transaction_hash
             FROM filled_v3_relays t
             LEFT JOIN transaction_details td ON t.transaction_hash = td.transaction_hash AND td.chain_id = %s
-            WHERE td.transaction_hash IS NULL AND t.origin_chain_id = %s
+            WHERE td.transaction_hash IS NULL AND t.chain_id = %s
             """
         elif table_name == 'v3_funds_deposited':
             query = """
@@ -188,20 +198,20 @@ class DatabaseOperations:
                 GREATEST(0, t.gas_price - b.base_fee_per_gas) * t.gas_used AS priority_fee,
                 f.input_amount * COALESCE(p1.price_usd, 1) AS input_amount_usd,
                 f.output_amount * COALESCE(p2.price_usd, 1) AS output_amount_usd,
-                (f.input_amount * COALESCE(p1.price_usd, 1) - f.output_amount * COALESCE(p2.price_usd, 1) - COALESCE(t.total_gas_fee, 0) * 2587.59) AS earned_amount_usd
+                (f.input_amount * COALESCE(p1.price_usd, 1) - f.output_amount * COALESCE(p2.price_usd, 1) - COALESCE(t.total_gas_fee, 0)) AS earned_amount_usd
             FROM 
                 filled_v3_relays f
             JOIN
-                v3_funds_deposited d ON f.deposit_id = d.deposit_id AND f.depositor = d.depositor
-            LEFT JOIN
-                transaction_details t ON f.transaction_hash = t.transaction_hash AND f.origin_chain_id = t.chain_id
-            LEFT JOIN
-                block_details b ON t.chain_id = b.chain_id AND t.block_timestamp = b.block_timestamp
-            LEFT JOIN
-                (SELECT token_address, price_usd FROM token_prices WHERE price_date = (SELECT MAX(price_date) FROM token_prices)) p1 
+                v3_funds_deposited d ON f.deposit_id = d.deposit_id AND f.chain_id = d.destination_chain_id
+            JOIN
+                transaction_details t ON f.transaction_hash = t.transaction_hash AND f.chain_id = t.chain_id
+            JOIN
+                block_details b ON t.chain_id = b.chain_id AND b.block_number = f.block_number
+            JOIN
+                (SELECT token_address, price_usd FROM token_prices) p1 
                 ON f.input_token = p1.token_address
-            LEFT JOIN
-                (SELECT token_address, price_usd FROM token_prices WHERE price_date = (SELECT MAX(price_date) FROM token_prices)) p2 
+            JOIN
+                (SELECT token_address, price_usd FROM token_prices) p2 
                 ON f.output_token = p2.token_address
             WHERE f.deposit_id IN ({})
             """
@@ -224,7 +234,7 @@ class DatabaseOperations:
     def get_unique_blocks(self):
         query = """
         SELECT DISTINCT chain_id, block_number FROM (
-            SELECT origin_chain_id as chain_id, block_number FROM filled_v3_relays
+            SELECT chain_id, block_number FROM filled_v3_relays
             UNION
             SELECT chain_id, block_number FROM v3_funds_deposited
         ) as combined
