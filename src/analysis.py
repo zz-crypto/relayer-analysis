@@ -2,15 +2,7 @@ import pandas as pd
 from sqlalchemy import create_engine    
 from db_operations import DatabaseOperations
 
-db_config = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': 'your_new_password',
-    'database': 'across_relay'
-}
-
-db_ops = DatabaseOperations(db_config)
+db_ops = DatabaseOperations()
 try:
     db_ops.connect()
     db_ops.fetch_and_insert_relay_data()

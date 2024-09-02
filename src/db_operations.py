@@ -1,12 +1,28 @@
 import mysql.connector
+import json
 from datetime import datetime
 
 class DatabaseOperations:
-    def __init__(self, db_config):
-        self.db_config = db_config
+    def __init__(self):
+        self.db_config = self.get_db_config()
         self.conn = None
         self.cursor = None
 
+    def get_db_config(self):
+        try:
+            with open('database_config.json', 'r') as config_file:
+                config = json.load(config_file)
+                return config['database']
+        except FileNotFoundError:
+            print("Error: config.json file not found.")
+            return None
+        except json.JSONDecodeError:
+            print("Error: config.json is not a valid JSON file.")
+            return None
+        except KeyError:
+            print("Error: 'database' key not found in config.json.")
+            return None
+    
     def connect(self):
         self.conn = mysql.connector.connect(**self.db_config)
         self.cursor = self.conn.cursor()
@@ -258,3 +274,51 @@ class DatabaseOperations:
         except Exception as e:
             print(f"Error inserting block details for chain {chain_id}: {e}")
             self.conn.rollback()
+
+    def get_last_synced_block(self, chain_id):
+        query = """
+        SELECT last_synced_block
+        FROM chain_sync_status
+        WHERE chain_id = %s
+        """
+        try:
+            self.cursor.execute(query, (chain_id,))
+            result = self.cursor.fetchone()
+            if result:
+                return result[0]
+            else:
+                return None
+        except mysql.connector.Error as err:
+            print(f"Error fetching last synced block for chain {chain_id}: {err}")
+            return None
+        
+    def update_chain_sync_status(self):
+        query = """
+        INSERT INTO chain_sync_status (chain_id, last_synced_block)
+        SELECT 
+            subquery.chain_id,
+            subquery.last_synced_block
+        FROM (
+            SELECT 
+                chain_id,
+                MAX(block_number) as last_synced_block
+            FROM 
+                filled_v3_relays
+            GROUP BY 
+                chain_id
+        ) AS subquery
+        ON DUPLICATE KEY UPDATE
+            last_synced_block = subquery.last_synced_block,
+            updated_at = CURRENT_TIMESTAMP;
+        """
+
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(query)
+            self.conn.commit()
+            print("Chain sync status updated successfully.")
+            return cursor.rowcount
+        except Exception as e:
+            print(f"Error updating chain sync status: {e}")
+            self.conn.rollback()
+            return 0

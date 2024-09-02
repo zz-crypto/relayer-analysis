@@ -57,15 +57,8 @@ def process_transactions(db_ops, chain_config):
 
 def main():
     config = load_config('config.json')
-    db_config = {
-        'host': 'localhost',
-        'port': 3306,
-        'user': 'root',
-        'password': 'your_new_password',
-        'database': 'across_relay'
-    }
 
-    db_ops = DatabaseOperations(db_config)
+    db_ops = DatabaseOperations()
 
     try:
         db_ops.connect()

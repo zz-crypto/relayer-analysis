@@ -186,3 +186,27 @@ SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_token_address ON token_prices
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+CREATE TABLE chain_sync_status (
+    chain_id INT NOT NULL,
+    last_synced_block INT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (chain_id)
+);
+
+INSERT INTO chain_sync_status (chain_id, last_synced_block)
+        SELECT 
+            subquery.chain_id,
+            subquery.last_synced_block
+        FROM (
+            SELECT 
+                chain_id,
+                MAX(block_number) as last_synced_block
+            FROM 
+                filled_v3_relays
+            GROUP BY 
+                chain_id
+        ) AS subquery
+        ON DUPLICATE KEY UPDATE
+            last_synced_block = subquery.last_synced_block,
+            updated_at = CURRENT_TIMESTAMP;
