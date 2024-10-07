@@ -4,3 +4,5 @@ __pycache__
 *.txt
 backup
 *.log
+*.docx
+src/analysis/pics

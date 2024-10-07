@@ -30,6 +30,11 @@ while true; do
     echo "Finished clean_up.py at $(date)" >> $OUTPUT_FILE
     echo "" >> $OUTPUT_FILE
 
+    echo "Starting fee_fetcher_hourly.py at $(date)" >> $OUTPUT_FILE
+    python3 fee_fetcher_hourly.py >> $OUTPUT_FILE 2>&1
+    echo "Finished fee_fetcher_hourly.py at $(date)" >> $OUTPUT_FILE
+    echo "" >> $OUTPUT_FILE
+
     end_time=$(date +%s)
 
     runtime=$((end_time - start_time))
